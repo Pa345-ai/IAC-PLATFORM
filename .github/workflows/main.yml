@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   terraform:
     name: "Standardize & Secure"
@@ -17,7 +21,6 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
-          # RUTHLESS NOTE: Pinned to 1.5.7 for stability. No more "+" wildcards.
           terraform_version: 1.5.7
 
       - name: Terraform Format
@@ -34,18 +37,20 @@ jobs:
         with:
           working_directory: .
 
+      # RUTHLESS FIX: We use the SETUP action first
       - name: Setup Infracost
-        uses: infracost/actions/setup@v2
+        uses: infracost/actions/setup@v3
         with:
           api_key: ${{ secrets.INFRACOST_API_KEY }}
 
       - name: Generate Infracost JSON
         run: infracost breakdown --path . --format json --out-file /tmp/infracost.json
 
+      # RUTHLESS FIX: Use the specific infracost-action@v0.12.x or similar 
+      # or use the script method to guarantee it never fails due to repo structure
       - name: Post Infracost comment
         if: github.event_name == 'pull_request'
-        # FIXED: This path must be exact. Sub-directories in repos require this format.
-        uses: infracost/actions/comment@v2
+        uses: infracost/actions/comment@v3
         with:
           path: /tmp/infracost.json
           behavior: update
