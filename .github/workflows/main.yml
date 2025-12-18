@@ -8,44 +8,56 @@ on:
 
 jobs:
   terraform:
+    name: "Standardize & Secure"
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v3
 
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v2
-      with:
-        terraform_version: 1.0+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          # RUTHLESS NOTE: Pinned to 1.5.7 for stability. No more "+" wildcards.
+          terraform_version: 1.5.7
 
-    - name: Terraform Format
-      run: terraform fmt -check
+      - name: Terraform Format
+        run: terraform fmt -check
 
-    - name: TFLint
-      uses: terraform-linters/setup-tflint@v3
-      with:
-        tflint_version: v0.44.1
-    - run: tflint --init && tflint
+      - name: TFLint
+        uses: terraform-linters/setup-tflint@v3
+        with:
+          tflint_version: v0.44.1
+      - run: tflint --init && tflint
 
-    - name: TFSec Security Scan
-      uses: aquasecurity/tfsec-action@v1.0.0
-      with:
-        working_directory: .
+      - name: TFSec Security Scan
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          working_directory: .
 
-    - name: Infracost Cost Estimate
-      uses: infracost/actions/setup@v2
-      with:
-        api_key: ${{ secrets.INFRACOST_API_KEY }}
-    - run: infracost breakdown --path . --format json --out-file infracost.json
-    - name: Comment PR with Cost
-      if: github.event_name == 'pull_request'
-      uses: infracost/actions/comment@v2
-      with:
-        path: infracost.json
-        behavior: update
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v2
+        with:
+          api_key: ${{ secrets.INFRACOST_API_KEY }}
 
-    - name: Terraform Plan
-      run: terraform plan -var-file=environments/dev.tfvars
-      env:
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: Generate Infracost JSON
+        run: infracost breakdown --path . --format json --out-file /tmp/infracost.json
+
+      - name: Post Infracost comment
+        if: github.event_name == 'pull_request'
+        # FIXED: This path must be exact. Sub-directories in repos require this format.
+        uses: infracost/actions/comment@v2
+        with:
+          path: /tmp/infracost.json
+          behavior: update
+
+      - name: Terraform Init
+        run: terraform init
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Terraform Plan
+        run: terraform plan -var-file=environments/dev.tfvars
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
