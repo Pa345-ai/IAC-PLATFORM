@@ -20,30 +20,36 @@ resource "random_password" "db_password" {
 resource "aws_secretsmanager_secret_rotation" "db_password" {
   secret_id           = aws_secretsmanager_secret.db_password.id
   rotation_lambda_arn = aws_lambda_function.rotation.arn
-  rotation_rules { automatically_after_days = 30 }
+  rotation_rules {
+    automatically_after_days = 30
+  }
 }
 
-resource "aws_kms_key" "secrets" { description = "KMS for Secrets" }
+resource "aws_kms_key" "secrets" {
+  description = "KMS for Secrets"
+}
 
 resource "aws_db_instance" "main" {
-  allocated_storage      = 20
-  engine                 = "postgres"
-  engine_version         = "13.7"
-  instance_class         = "db.t3.micro"
-  db_name                = var.db_name
-  username               = var.db_username
-  password               = jsondecode(aws_secretsmanager_secret_version.db_password.secret_string)["password"]
-  vpc_security_group_ids = [var.security_group_id]
-  db_subnet_group_name   = aws_db_subnet_group.main.name
-  multi_az               = true
-  deletion_protection    = true
+  allocated_storage       = 20
+  engine                  = "postgres"
+  engine_version          = "13.7"
+  instance_class          = "db.t3.micro"
+  db_name                 = var.db_name
+  username                = var.db_username
+  password                = jsondecode(aws_secretsmanager_secret_version.db_password.secret_string)["password"]
+  vpc_security_group_ids  = [var.security_group_id]
+  db_subnet_group_name    = aws_db_subnet_group.main.name
+  multi_az                = true
+  deletion_protection     = true
   backup_retention_period = 35
-  storage_encrypted      = true
-  kms_key_id             = aws_kms_key.rds.arn
-  tags = { Name = "${var.app_name}-db" }
+  storage_encrypted       = true
+  kms_key_id              = aws_kms_key.rds.arn
+  tags                    = { Name = "${var.app_name}-db" }
 }
 
-resource "aws_kms_key" "rds" { description = "KMS for RDS" }
+resource "aws_kms_key" "rds" {
+  description = "KMS for RDS"
+}
 
 resource "aws_db_subnet_group" "main" {
   name       = "${var.app_name}-db-subnet-group"
@@ -51,4 +57,12 @@ resource "aws_db_subnet_group" "main" {
 }
 
 # AWS Backup
-resource "aws_backup
+resource "aws_backup_plan" "rds_backup" {
+  name = "${var.app_name}-backup-plan"
+
+  rule {
+    rule_name         = "daily_backup"
+    target_vault_name = "default"
+    schedule          = "cron(0 12 * * ? *)"
+  }
+}
