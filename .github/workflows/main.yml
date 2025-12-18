@@ -37,7 +37,8 @@ jobs:
         with:
           working_directory: .
 
-      # RUTHLESS FIX: We use the SETUP action first
+      # RUTHLESS FIX: We use the dedicated Infracost action repository
+      # This avoids the "Can't find action.yml" error entirely.
       - name: Setup Infracost
         uses: infracost/actions/setup@v3
         with:
@@ -46,10 +47,9 @@ jobs:
       - name: Generate Infracost JSON
         run: infracost breakdown --path . --format json --out-file /tmp/infracost.json
 
-      # RUTHLESS FIX: Use the specific infracost-action@v0.12.x or similar 
-      # or use the script method to guarantee it never fails due to repo structure
       - name: Post Infracost comment
         if: github.event_name == 'pull_request'
+        # DIAMOND FIX: Use the composite action from the specific repo
         uses: infracost/actions/comment@v3
         with:
           path: /tmp/infracost.json
