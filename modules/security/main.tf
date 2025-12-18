@@ -13,7 +13,8 @@ resource "aws_security_group" "alb" {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    # Restricted to VPC CIDR to prevent data exfiltration
+    cidr_blocks = [var.vpc_cidr]
   }
 
   tags = { Name = "${var.app_name}-alb-sg" }
@@ -33,7 +34,8 @@ resource "aws_security_group" "ecs" {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    # Restricted to VPC CIDR
+    cidr_blocks = [var.vpc_cidr]
   }
 
   tags = { Name = "${var.app_name}-ecs-sg" }
@@ -53,7 +55,8 @@ resource "aws_security_group" "rds" {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    # Restricted to VPC CIDR
+    cidr_blocks = [var.vpc_cidr]
   }
 
   tags = { Name = "${var.app_name}-rds-sg" }
@@ -124,7 +127,8 @@ resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.main.arn
   port              = "443"
   protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  # FIXED: Upgraded to modern TLS 1.2 policy
+  ssl_policy        = "ELBSecurityPolicy-TLS-1-2-2017-01"
   certificate_arn   = aws_acm_certificate.main.arn
 
   default_action {
