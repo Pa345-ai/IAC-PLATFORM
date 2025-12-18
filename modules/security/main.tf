@@ -1,36 +1,61 @@
+# Security Groups
 resource "aws_security_group" "alb" {
   vpc_id = var.vpc_id
+
   ingress {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = [var.allowed_cidr]
   }
-  egress { from_port = 0; to_port = 0; protocol = "-1"; cidr_blocks = ["0.0.0.0/0"] }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   tags = { Name = "${var.app_name}-alb-sg" }
 }
 
 resource "aws_security_group" "ecs" {
   vpc_id = var.vpc_id
+
   ingress {
     from_port       = 3000
     to_port         = 3000
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }
-  egress { from_port = 0; to_port = 0; protocol = "-1"; cidr_blocks = ["0.0.0.0/0"] }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   tags = { Name = "${var.app_name}-ecs-sg" }
 }
 
 resource "aws_security_group" "rds" {
   vpc_id = var.vpc_id
+
   ingress {
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
     security_groups = [aws_security_group.ecs.id]
   }
-  egress { from_port = 0; to_port = 0; protocol = "-1"; cidr_blocks = ["0.0.0.0/0"] }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   tags = { Name = "${var.app_name}-rds-sg" }
 }
 
@@ -44,7 +69,7 @@ resource "aws_route53_zone" "main" {
 resource "aws_acm_certificate" "main" {
   domain_name       = var.domain_name
   validation_method = "DNS"
-  tags = { Name = "${var.app_name}-cert" }
+  tags              = { Name = "${var.app_name}-cert" }
 }
 
 resource "aws_route53_record" "validation" {
@@ -68,13 +93,14 @@ resource "aws_acm_certificate_validation" "main" {
   validation_record_fqdns = [for record in aws_route53_record.validation : record.fqdn]
 }
 
+# Load Balancer
 resource "aws_lb" "main" {
   name               = "${var.app_name}-alb"
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = var.public_subnet_ids
-  tags = { Name = "${var.app_name}-alb" }
+  tags               = { Name = "${var.app_name}-alb" }
 }
 
 resource "aws_lb_target_group" "app" {
@@ -83,6 +109,7 @@ resource "aws_lb_target_group" "app" {
   protocol    = "HTTP"
   vpc_id      = var.vpc_id
   target_type = "ip"
+
   health_check {
     path                = "/health"
     matcher             = "200"
@@ -99,6 +126,7 @@ resource "aws_lb_listener" "https" {
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-2016-08"
   certificate_arn   = aws_acm_certificate.main.arn
+
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.app.arn
@@ -110,25 +138,47 @@ resource "aws_wafv2_web_acl" "main" {
   name        = "${var.app_name}-waf"
   description = "WAF for ALB"
   scope       = "REGIONAL"
-  default_action { allow {} }
+
+  default_action {
+    allow {}
+  }
+
   rule {
     name     = "AWSManagedRulesCommonRuleSet"
     priority = 1
     override_action { none {} }
-    statement { managed_rule_group_statement { vendor_name = "AWS"; name = "AWSManagedRulesCommonRuleSet" } }
+    statement {
+      managed_rule_group_statement {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesCommonRuleSet"
+      }
+    }
   }
+
   rule {
     name     = "AWSManagedRulesSQLiRuleSet"
     priority = 2
     override_action { none {} }
-    statement { managed_rule_group_statement { vendor_name = "AWS"; name = "AWSManagedRulesSQLiRuleSet" } }
+    statement {
+      managed_rule_group_statement {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesSQLiRuleSet"
+      }
+    }
   }
+
   rule {
     name     = "AWSManagedRulesKnownBadInputsRuleSet"
     priority = 3
     override_action { none {} }
-    statement { managed_rule_group_statement { vendor_name = "AWS"; name = "AWSManagedRulesKnownBadInputsRuleSet" } }
+    statement {
+      managed_rule_group_statement {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+      }
+    }
   }
+
   visibility_config {
     cloudwatch_metrics_enabled = true
     metric_name                = "${var.app_name}-waf"
@@ -143,6 +193,7 @@ resource "aws_wafv2_web_acl_association" "alb" {
 
 # GuardDuty and Config
 resource "aws_guardduty_detector" "main" { enable = true }
+
 resource "aws_config_configuration_recorder" "main" {
   name     = "${var.app_name}-config"
   role_arn = aws_iam_role.config.arn
