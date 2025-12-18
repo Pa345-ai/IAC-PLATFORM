@@ -1,93 +1,145 @@
-# Day 2 Recovery Guide
+# Day 2 Recovery Playbook
 
 
 
-This guide provides step-by-step CLI commands for common recovery scenarios. Run these with AWS CLI configured.
+This document contains "Break-Glass" procedures for critical infrastructure recovery. Ensure you have the AdministratorAccess IAM policy attached to your CLI session before proceeding.
 
 
 
-## RDS Point-in-Time Restore
+---
 
-To restore the database to a specific timestamp (e.g., 2023-10-01T12:00:00Z):
 
-aws rds restore-db-instance-to-point-in-time
 
---source-db-instance-identifier <your-db-instance-id>
+## 1. RDS Point-in-Time Restore (PITR)
 
---target-db-instance-identifier <new-db-name>
+**Use Case:** Data corruption or accidental table deletion.
 
---restore-time 2023-10-01T12:00:00Z
 
---db-instance-class db.t3.micro
 
---db-subnet-group-name <your-subnet-group>
+### Pre-flight Check
 
---vpc-security-group-ids <your-sg-id>
+Verify your source DB has backup retention enabled:
 
---no-multi-az
-
---no-deletion-protection
+`aws rds describe-db-instances --db-instance-identifier <source-id> --query 'DBInstances[*].BackupRetentionPeriod'`
 
 
 
 
 
 
-- Replace placeholders with values from Terraform outputs.
 
-- This creates a new DB instance; update ECS secrets if needed.
+### Execution
 
+```bash
 
+aws rds restore-db-instance-to-point-in-time \
 
-## ECS Rollback to Previous Image
+  --source-db-instance-identifier <your-db-instance-id> \
 
-To roll back ECS service to a previous ECR image tag (e.g., v1.0):
+  --target-db-instance-identifier <new-db-instance-name> \
 
-aws ecs update-service
+  --restore-time 2025-12-18T12:00:00Z \
 
---cluster <your-cluster-name>
+  --db-instance-class db.t3.micro \
 
---service <your-service-name>
+  --db-subnet-group-name <your-subnet-group> \
 
---force-new-deployment
+  --vpc-security-group-ids <your-sg-id>
 
---task-definition <previous-task-def-arn>
-
-
-
+Note: This creates a NEW instance. You must update the connection strings in AWS Secrets Manager to point to the new endpoint once the restore is complete.
 
 
 
-- Find previous task definition ARN in AWS console or CLI: `aws ecs list-task-definitions --family-prefix <your-task-family>`.
+2. ECS Service Rollback
 
-- Update the task definition JSON with the old image tag before registering.
-
-
-
-## Emergency WAF Bypass (Break-Glass)
-
-To temporarily disable WAF for troubleshooting:
-
-aws wafv2 update-web-acl
-
---name <your-waf-name>
-
---scope REGIONAL
-
---id <your-waf-id>
-
---default-action Block={}
-
---rules '[]' # Empty rules to bypass
+Use Case: Failed application deployment or critical bug in the latest container.
 
 
 
+Execution
+
+Bash
 
 
 
-- Re-enable by restoring original rules. Use with caution; monitor closely.
+# 1. List previous versions to find the known-good ARN
+
+aws ecs list-task-definitions --family-prefix <your-task-family>
 
 
 
-For full disaster recovery, refer to AWS Backup for cross-region restores.
+# 2. Force rollback to the stable ARN
+
+aws ecs update-service \
+
+  --cluster <your-cluster-name> \
+
+  --service <your-service-name> \
+
+  --task-definition <previous-task-def-arn> \
+
+  --force-new-deployment
+
+3. Emergency WAF Break-Glass
+
+Use Case: WAF is blocking legitimate traffic (False Positives) during a critical event.
+
+
+
+Execution
+
+Bash
+
+
+
+# 1. Get the current lock token (required for updates)
+
+TOKEN=$(aws wafv2 get-web-acl --name <your-waf-name> --scope REGIONAL --id <your-waf-id> --query 'LockToken' --output text)
+
+
+
+# 2. Clear rules to allow all traffic
+
+aws wafv2 update-web-acl \
+
+  --name <your-waf-name> \
+
+  --scope REGIONAL \
+
+  --id <your-waf-id> \
+
+  --default-action Allow={} \
+
+  --rules '[]' \
+
+  --lock-token $TOKEN
+
+4. S3 State Recovery
+
+Use Case: Accidental deletion of the Terraform State file.
+
+
+
+Because versioning is enabled in the Bootstrap configuration, you can recover any previous state file version:
+
+
+
+Identify the version ID: aws s3api list-object-versions --bucket <state-bucket> --prefix terraform.tfstate
+
+
+
+Restore the object: aws s3api copy-object --copy-source <bucket>/terraform.tfstate?versionId=<id> --bucket <bucket> --key terraform.tfstate
+
+
+
+Support & Escalation
+
+For high-priority infrastructure failure, verify logs in CloudWatch Logs under the /aws/ecs/ or /aws/rds/ namespaces before initiating recovery procedures.
+
+
+
+
+
+---
+
 
