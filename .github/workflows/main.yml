@@ -1,0 +1,51 @@
+name: Terraform CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: 1.0+
+
+    - name: Terraform Format
+      run: terraform fmt -check
+
+    - name: TFLint
+      uses: terraform-linters/setup-tflint@v3
+      with:
+        tflint_version: v0.44.1
+    - run: tflint --init && tflint
+
+    - name: TFSec Security Scan
+      uses: aquasecurity/tfsec-action@v1.0.0
+      with:
+        working_directory: .
+
+    - name: Infracost Cost Estimate
+      uses: infracost/actions/setup@v2
+      with:
+        api_key: ${{ secrets.INFRACOST_API_KEY }}
+    - run: infracost breakdown --path . --format json --out-file infracost.json
+    - name: Comment PR with Cost
+      if: github.event_name == 'pull_request'
+      uses: infracost/actions/comment@v2
+      with:
+        path: infracost.json
+        behavior: update
+
+    - name: Terraform Plan
+      run: terraform plan -var-file=environments/dev.tfvars
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
