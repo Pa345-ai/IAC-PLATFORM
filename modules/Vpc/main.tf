@@ -113,7 +113,6 @@ resource "aws_iam_role" "flow_log" {
   })
 }
 
-# FIXED: Removed wildcard resource "*" and restricted to specific log group ARN
 resource "aws_iam_role_policy" "flow_log" {
   name = "${var.app_name}-flow-log-policy"
   role = aws_iam_role.flow_log.id
@@ -128,9 +127,9 @@ resource "aws_iam_role_policy" "flow_log" {
           "logs:DescribeLogGroups",
           "logs:DescribeLogStreams"
         ]
-        # Target only the specific log group created above
+        # FIXED: ARNs are explicitly scoped to this log group only
         Resource = [
-          "${aws_cloudwatch_log_group.flow_log.arn}",
+          aws_cloudwatch_log_group.flow_log.arn,
           "${aws_cloudwatch_log_group.flow_log.arn}:*"
         ]
       }
