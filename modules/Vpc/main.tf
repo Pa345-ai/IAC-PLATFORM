@@ -1,16 +1,17 @@
 resource "aws_vpc" "main" {
-  cidr_block = "10.0.0.0/16"
-  enable_dns_support = true
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_support   = true
   enable_dns_hostnames = true
-  tags = { Name = "${var.app_name}-vpc" }
+  tags                 = { Name = "${var.app_name}-vpc" }
 }
 
 resource "aws_subnet" "public" {
-  count             = 3
-  vpc_id            = aws_vpc.main.id
-  cidr_block        = cidrsubnet(aws_vpc.main.cidr_block, 8, count.index)
-  availability_zone = data.aws_availability_zones.available.names[count.index]
-  tags = { Name = "${var.app_name}-public-${count.index}" }
+  count                   = 3
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = cidrsubnet(aws_vpc.main.cidr_block, 8, count.index)
+  availability_zone       = data.aws_availability_zones.available.names[count.index]
+  map_public_ip_on_launch = false
+  tags                    = { Name = "${var.app_name}-public-${count.index}" }
 }
 
 resource "aws_subnet" "private" {
@@ -18,24 +19,25 @@ resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = cidrsubnet(aws_vpc.main.cidr_block, 8, count.index + 3)
   availability_zone = data.aws_availability_zones.available.names[count.index]
-  tags = { Name = "${var.app_name}-private-${count.index}" }
+  tags              = { Name = "${var.app_name}-private-${count.index}" }
 }
 
 resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.main.id
-  tags = { Name = "${var.app_name}-igw" }
+  tags   = { Name = "${var.app_name}-igw" }
 }
 
 resource "aws_nat_gateway" "nat" {
   count         = 3
   allocation_id = aws_eip.nat[count.index].id
   subnet_id     = aws_subnet.public[count.index].id
-  tags = { Name = "${var.app_name}-nat-${count.index}" }
+  tags          = { Name = "${var.app_name}-nat-${count.index}" }
 }
 
 resource "aws_eip" "nat" {
-  count = 3
-  vpc   = true
+  count  = 3
+  domain = "vpc"
+  tags   = { Name = "${var.app_name}-eip-${count.index}" }
 }
 
 resource "aws_route_table" "public" {
@@ -48,10 +50,10 @@ resource "aws_route_table" "public" {
 }
 
 resource "aws_route_table" "private" {
-  count = 3
+  count  = 3
   vpc_id = aws_vpc.main.id
   route {
-    cidr_block = "0.0.0.0/0"
+    cidr_block     = "0.0.0.0/0"
     nat_gateway_id = aws_nat_gateway.nat[count.index].id
   }
   tags = { Name = "${var.app_name}-private-rt-${count.index}" }
@@ -73,6 +75,18 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+# KMS Key for CloudWatch Logs
+resource "aws_kms_key" "flow_log" {
+  description             = "KMS key for VPC Flow Logs encryption"
+  deletion_window_in_days = 10
+  enable_key_rotation     = true
+}
+
+resource "aws_kms_alias" "flow_log" {
+  name          = "alias/${var.app_name}-flow-log"
+  target_key_id = aws_kms_key.flow_log.key_id
+}
+
 # VPC Flow Logs
 resource "aws_flow_log" "vpc" {
   iam_role_arn    = aws_iam_role.flow_log.arn
@@ -84,6 +98,7 @@ resource "aws_flow_log" "vpc" {
 resource "aws_cloudwatch_log_group" "flow_log" {
   name              = "/aws/vpc/flow-log/${var.app_name}"
   retention_in_days = 30
+  kms_key_id        = aws_kms_key.flow_log.arn
 }
 
 resource "aws_iam_role" "flow_log" {
@@ -98,7 +113,23 @@ resource "aws_iam_role" "flow_log" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "flow_log" {
-  role       = aws_iam_role.flow_log.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonVPCCrossAccountFlowLogsPublisher"
+resource "aws_iam_role_policy" "flow_log" {
+  name = "${var.app_name}-flow-log-policy"
+  role = aws_iam_role.flow_log.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
 }
