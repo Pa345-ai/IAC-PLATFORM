@@ -1,0 +1,61 @@
+# environments/global/iam/outputs.tf
+
+output "permission_boundary_arn" {
+  description = "ARN of the permission boundary policy (attach to all IAM entities)"
+  value       = aws_iam_policy.permission_boundary.arn
+}
+
+output "permission_boundary_name" {
+  description = "Name of the permission boundary policy"
+  value       = aws_iam_policy.permission_boundary.name
+}
+
+output "admin_role_arn" {
+  description = "ARN of the admin role"
+  value       = aws_iam_role.admin.arn
+}
+
+output "developer_role_arn" {
+  description = "ARN of the developer role"
+  value       = aws_iam_role.developer.arn
+}
+
+output "auditor_role_arn" {
+  description = "ARN of the auditor role"
+  value       = aws_iam_role.auditor.arn
+}
+
+output "eks_cluster_role_arn" {
+  description = "ARN of the EKS cluster role"
+  value       = aws_iam_role.eks_cluster.arn
+}
+
+output "eks_node_role_arn" {
+  description = "ARN of the EKS node role"
+  value       = aws_iam_role.eks_node.arn
+}
+
+output "eks_node_instance_profile" {
+  description = "Instance profile for EKS nodes"
+  value       = aws_iam_instance_profile.eks_node.name
+}
+
+output "rds_monitoring_role_arn" {
+  description = "ARN of the RDS enhanced monitoring role"
+  value       = aws_iam_role.rds_monitoring.arn
+}
+
+output "access_analyzer_arn" {
+  description = "ARN of the IAM Access Analyzer"
+  value       = aws_accessanalyzer_analyzer.main.arn
+}
+
+# Instance Profile for EKS Nodes
+resource "aws_iam_instance_profile" "eks_node" {
+  name = "EKSNodeInstanceProfile"
+  role = aws_iam_role.eks_node.name
+  
+  tags = {
+    Name = "EKSNodeInstanceProfile"
+  }
+}
