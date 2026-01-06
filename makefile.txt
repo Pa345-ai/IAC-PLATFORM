@@ -1,0 +1,205 @@
+.PHONY: help init validate plan apply destroy fmt lint security-scan compliance-check test clean bootstrap
+
+SHELL := /bin/bash
+TF_VERSION := 1.6.0
+AWS_REGION := us-east-1
+ENV ?= dev
+
+# Color output
+RED := \033[0;31m
+GREEN := \033[0;32m
+YELLOW := \033[1;33m
+NC := \033[0m
+
+help: ## Display this help message
+	@echo "════════════════════════════════════════════════════════════"
+	@echo "  🏦 SOVEREIGN CLOUD ARCHIVE - Bank-Grade IaC Operations"
+	@echo "════════════════════════════════════════════════════════════"
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make $(GREEN)<target>$(NC) [ENV=<environment>]\n\nTargets:\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  $(GREEN)%-20s$(NC) %s\n", $$1, $$2 } /^##@/ { printf "\n$(YELLOW)%s$(NC)\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+
+##@ Bootstrap Operations
+
+bootstrap: ## Initialize state backend (S3/DynamoDB)
+	@echo "$(GREEN)🚀 Bootstrapping state backend...$(NC)"
+	cd environments/bootstrap && terraform init && terraform apply -auto-approve
+	@echo "$(GREEN)✓ Bootstrap complete$(NC)"
+
+##@ Environment Operations
+
+init: ## Initialize Terraform for environment (ENV=dev|staging|prod)
+	@echo "$(GREEN)🔧 Initializing $(ENV) environment...$(NC)"
+	cd environments/$(ENV) && terraform init -upgrade
+	@echo "$(GREEN)✓ Initialization complete$(NC)"
+
+validate: ## Validate Terraform configuration
+	@echo "$(GREEN)✅ Validating configuration...$(NC)"
+	terraform fmt -check -recursive
+	cd environments/$(ENV) && terraform validate
+	@echo "$(GREEN)✓ Validation successful$(NC)"
+
+plan: init ## Generate Terraform plan
+	@echo "$(GREEN)📋 Generating plan for $(ENV)...$(NC)"
+	cd environments/$(ENV) && terraform plan -out=tfplan.binary
+	cd environments/$(ENV) && terraform show -no-color tfplan.binary | tee tfplan.txt
+	@echo "$(GREEN)✓ Plan generated$(NC)"
+
+apply: ## Apply Terraform changes
+	@echo "$(YELLOW)⚠️  Applying changes to $(ENV)...$(NC)"
+	@read -p "Are you sure? [y/N] " -n 1 -r; \
+	echo; \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		cd environments/$(ENV) && terraform apply tfplan.binary; \
+		echo "$(GREEN)✓ Apply complete$(NC)"; \
+	else \
+		echo "$(RED)✗ Apply cancelled$(NC)"; \
+	fi
+
+destroy: ## Destroy infrastructure (DANGEROUS)
+	@echo "$(RED)💥 WARNING: This will DESTROY all resources in $(ENV)!$(NC)"
+	@read -p "Type the environment name to confirm: " confirm; \
+	if [ "$$confirm" = "$(ENV)" ]; then \
+		cd environments/$(ENV) && terraform destroy; \
+	else \
+		echo "$(RED)✗ Environment name mismatch. Destruction cancelled.$(NC)"; \
+	fi
+
+##@ Code Quality
+
+fmt: ## Format Terraform code
+	@echo "$(GREEN)🎨 Formatting code...$(NC)"
+	terraform fmt -recursive
+	@echo "$(GREEN)✓ Formatting complete$(NC)"
+
+lint: ## Run linting checks
+	@echo "$(GREEN)🔍 Running TFLint...$(NC)"
+	@for dir in environments/*/; do \
+		echo "Linting $$dir"; \
+		cd $$dir && tflint --init && tflint || exit 1; \
+		cd ../..; \
+	done
+	@echo "$(GREEN)✓ Linting complete$(NC)"
+
+##@ Security & Compliance
+
+security-scan: ## Run security scans (TFSec + Checkov)
+	@echo "$(GREEN)🔒 Running security scans...$(NC)"
+	@echo "Running TFSec..."
+	tfsec . --minimum-severity HIGH --force-all-dirs
+	@echo "Running Checkov..."
+	checkov -d . --framework terraform --quiet --compact
+	@echo "$(GREEN)✓ Security scan complete$(NC)"
+
+compliance-check: ## Run compliance policy checks
+	@echo "$(GREEN)📋 Running compliance checks...$(NC)"
+	@echo "Testing OPA policies..."
+	opa test policies/rego/*.rego
+	@echo "Running Conftest..."
+	conftest test environments/ -p policies/rego/ --all-namespaces
+	@echo "$(GREEN)✓ Compliance check complete$(NC)"
+
+secrets-scan: ## Scan for secrets in code
+	@echo "$(GREEN)🔐 Scanning for secrets...$(NC)"
+	@if command -v trufflehog &> /dev/null; then \
+		trufflehog filesystem . --only-verified; \
+	else \
+		echo "$(YELLOW)⚠️  TruffleHog not installed. Skipping...$(NC)"; \
+	fi
+	@echo "$(GREEN)✓ Secrets scan complete$(NC)"
+
+##@ Testing
+
+test: validate security-scan compliance-check ## Run all tests
+	@echo "$(GREEN)🧪 Running comprehensive tests...$(NC)"
+	./scripts/setup.sh --validate
+	@echo "$(GREEN)✓ All tests passed$(NC)"
+
+##@ Operational Tasks
+
+rotate-credentials: ## Rotate AWS credentials and secrets
+	@echo "$(GREEN)🔄 Rotating credentials...$(NC)"
+	./scripts/rotate-credentials.sh
+	@echo "$(GREEN)✓ Credential rotation complete$(NC)"
+
+drift-detect: ## Detect infrastructure drift
+	@echo "$(GREEN)🔍 Detecting drift in $(ENV)...$(NC)"
+	cd environments/$(ENV) && terraform plan -detailed-exitcode
+	@echo "$(GREEN)✓ Drift detection complete$(NC)"
+
+state-backup: ## Backup Terraform state
+	@echo "$(GREEN)💾 Backing up state...$(NC)"
+	aws s3 cp s3://sovereign-tfstate-$(ENV)/terraform.tfstate \
+		./backups/terraform-$(ENV)-$$(date +%Y%m%d-%H%M%S).tfstate
+	@echo "$(GREEN)✓ State backed up$(NC)"
+
+disaster-recovery: ## Execute disaster recovery plan
+	@echo "$(RED)🚨 Initiating disaster recovery...$(NC)"
+	./scripts/disaster-recovery.sh
+	@echo "$(GREEN)✓ Disaster recovery complete$(NC)"
+
+##@ Documentation
+
+docs: ## Generate documentation
+	@echo "$(GREEN)📚 Generating documentation...$(NC)"
+	terraform-docs markdown table --output-file README.md --output-mode inject .
+	@echo "$(GREEN)✓ Documentation generated$(NC)"
+
+diagram: ## Generate architecture diagrams
+	@echo "$(GREEN)🎨 Generating architecture diagrams...$(NC)"
+	@if command -v terraform-visual &> /dev/null; then \
+		terraform-visual --plan environments/$(ENV)/tfplan.json; \
+	else \
+		echo "$(YELLOW)⚠️  terraform-visual not installed$(NC)"; \
+	fi
+
+##@ Maintenance
+
+clean: ## Clean temporary files
+	@echo "$(GREEN)🧹 Cleaning temporary files...$(NC)"
+	find . -type d -name ".terraform" -prune -exec rm -rf {} \;
+	find . -type f -name "tfplan.*" -delete
+	find . -type f -name "*.log" -delete
+	@echo "$(GREEN)✓ Cleanup complete$(NC)"
+
+upgrade-providers: ## Upgrade provider versions
+	@echo "$(GREEN)⬆️  Upgrading providers...$(NC)"
+	@for dir in environments/*/; do \
+		cd $$dir && terraform init -upgrade && cd ../..; \
+	done
+	@echo "$(GREEN)✓ Providers upgraded$(NC)"
+
+cost-estimate: ## Estimate infrastructure costs
+	@echo "$(GREEN)💰 Estimating costs for $(ENV)...$(NC)"
+	infracost breakdown --path=environments/$(ENV)
+	@echo "$(GREEN)✓ Cost estimation complete$(NC)"
+
+##@ CI/CD Integration
+
+ci-init: ## Initialize for CI/CD pipeline
+	@echo "$(GREEN)🔧 Initializing for CI/CD...$(NC)"
+	terraform --version
+	tfsec --version
+	checkov --version
+	@echo "$(GREEN)✓ CI/CD initialization complete$(NC)"
+
+ci-validate: fmt validate lint ## Run CI validation checks
+	@echo "$(GREEN)✅ CI validation complete$(NC)"
+
+ci-security: security-scan secrets-scan ## Run CI security checks
+	@echo "$(GREEN)🔒 CI security checks complete$(NC)"
+
+ci-compliance: compliance-check ## Run CI compliance checks
+	@echo "$(GREEN)📋 CI compliance checks complete$(NC)"
+
+##@ Multi-Environment Operations
+
+deploy-all: ## Deploy to all environments sequentially
+	@echo "$(YELLOW)⚠️  Deploying to ALL environments...$(NC)"
+	$(MAKE) ENV=dev apply
+	$(MAKE) ENV=staging apply
+	@echo "$(YELLOW)⚠️  Production deployment requires manual approval$(NC)"
+
+plan-all: ## Generate plans for all environments
+	@for env in dev staging prod; do \
+		echo "$(GREEN)Planning $$env...$(NC)"; \
+		$(MAKE) ENV=$$env plan; \
+	done
