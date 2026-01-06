@@ -1,0 +1,35 @@
+# environments/bootstrap/terraform.tfvars.example
+# Copy this file to terraform.tfvars and customize for your organization
+
+# AWS Configuration
+aws_region = "us-east-1"
+
+# Environment
+environment = "bootstrap"
+
+# State Management
+state_bucket_force_destroy = false  # NEVER set to true in production
+enable_versioning          = true
+enable_logging             = true
+
+# DynamoDB Configuration
+enable_point_in_time_recovery = true
+
+# Logging Configuration
+log_retention_days = 90  # Minimum for compliance; 2555 days (7 years) for audit logs
+
+# KMS Configuration
+kms_deletion_window = 30
+enable_key_rotation = true
+
+# Additional Tags
+tags = {
+  Organization = "YourBankName"
+  Department   = "Infrastructure"
+  CostCenter   = "IT-001"
+  DataClass    = "Confidential"
+  Compliance   = "PCI-DSS-NIST-SOC2"
+  Owner        = "infrastructure-team@yourbank.com"
+  Project      = "CloudMigration"
+  BackupPolicy = "Critical"
+}
