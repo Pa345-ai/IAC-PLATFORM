@@ -10,7 +10,7 @@ on:
 
 env:
   TFSEC_VERSION: 'v1.28.1'
-  CHECKOV_VERSION: '3.0.0'
+  CHECKOV_VERSION: '3.2.497'
 
 jobs:
   tfsec:
