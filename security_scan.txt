@@ -1,0 +1,154 @@
+name: Security Scanning
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  schedule:
+    - cron: '0 2 * * *'
+
+env:
+  TFSEC_VERSION: 'v1.28.1'
+  CHECKOV_VERSION: '3.0.0'
+
+jobs:
+  tfsec:
+    name: TFSec Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: Run TFSec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          version: ${{ env.TFSEC_VERSION }}
+          soft_fail: false
+          format: sarif
+          additional_args: --minimum-severity HIGH --force-all-dirs
+          
+      - name: Upload SARIF Results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          
+  checkov:
+    name: Checkov Policy Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Install Checkov
+        run: |
+          pip install checkov==${{ env.CHECKOV_VERSION }}
+          
+      - name: Run Checkov Scan
+        run: |
+          checkov -d . \
+            --framework terraform \
+            --output sarif \
+            --output-file-path checkov-results.sarif \
+            --compact \
+            --quiet \
+            --skip-check CKV_AWS_79 \
+            --hard-fail-on HIGH,CRITICAL
+            
+      - name: Upload Checkov Results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov-results.sarif
+          
+  secret-scan:
+    name: Secret Detection
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: TruffleHog Secret Scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          
+  dependency-check:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: Terraform Dependency Check
+        run: |
+          # Extract all module sources
+          grep -r "source.*=.*\"" . | grep -v ".terraform" > modules.txt || true
+          
+          # Check for pinned versions
+          if grep -r "source.*=.*\".*?ref=" . | grep -v ".terraform"; then
+            echo "✓ Modules use version pinning"
+          else
+            echo "::warning::Some modules may not use version pinning"
+          fi
+          
+  compliance-baseline:
+    name: Compliance Baseline Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Install Checkov
+        run: pip install checkov==${{ env.CHECKOV_VERSION }}
+        
+      - name: PCI-DSS Compliance Check
+        run: |
+          checkov -d . --framework terraform --check CKV_AWS_8,CKV_AWS_18,CKV_AWS_19,CKV_AWS_20,CKV_AWS_21,CKV_AWS_24,CKV_AWS_33,CKV_AWS_34,CKV_AWS_38,CKV_AWS_40,CKV_AWS_41,CKV_AWS_45,CKV_AWS_50,CKV_AWS_51,CKV_AWS_53,CKV_AWS_61,CKV_AWS_65,CKV_AWS_68,CKV_AWS_89,CKV_AWS_91,CKV_AWS_93,CKV_AWS_94,CKV_AWS_96,CKV_AWS_108,CKV_AWS_109,CKV_AWS_111,CKV_AWS_115,CKV_AWS_116,CKV_AWS_117,CKV_AWS_118,CKV_AWS_119,CKV_AWS_126,CKV_AWS_129,CKV_AWS_130,CKV_AWS_131,CKV_AWS_149,CKV_AWS_150,CKV_AWS_158
+          
+      - name: NIST 800-53 Compliance Check
+        run: |
+          checkov -d . --framework terraform --check CKV_AWS_18,CKV_AWS_21,CKV_AWS_23,CKV_AWS_24,CKV_AWS_26,CKV_AWS_28,CKV_AWS_33,CKV_AWS_34,CKV_AWS_38,CKV_AWS_40,CKV_AWS_50,CKV_AWS_51,CKV_AWS_53,CKV_AWS_61,CKV_AWS_65
+          
+  security-report:
+    name: Generate Security Report
+    needs: [tfsec, checkov, secret-scan, dependency-check, compliance-baseline]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Security Summary
+        run: |
+          echo "## 🔒 Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| TFSec | ${{ needs.tfsec.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Checkov | ${{ needs.checkov.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Secret Scan | ${{ needs.secret-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependencies | ${{ needs.dependency-check.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Compliance | ${{ needs.compliance-baseline.result }} |" >> $GITHUB_STEP_SUMMARY
