@@ -1,0 +1,302 @@
+package terraform.iam_boundary_check
+
+import future.keywords.contains
+import future.keywords.if
+import future.keywords.in
+
+# METADATA
+# title: IAM Permission Boundary Enforcement
+# description: Prevents privilege escalation via IAM per NIST 800-53 AC-6
+# custom:
+#   severity: CRITICAL
+#   compliance: ["NIST-800-53-AC-6", "PCI-DSS-7.1", "SOC2-CC6.3"]
+
+# Required permission boundary ARN pattern
+required_boundary_pattern := "arn:aws:iam::\\d+:policy/BankPermissionBoundary"
+
+# All IAM users must have a permission boundary
+deny[msg] {
+    resource := input.resource_changes[_]
+    resource.type == "aws_iam_user"
+    resource.change.actions[_] == "create"
+    
+    boundary := object.get(resource.change.after, "permissions_boundary", "")
+    boundary == ""
+    
+    msg := sprintf(
+        "CRITICAL: IAM user '%s' does not have a permissions boundary. Required to prevent privilege escalation.",
+        [resource.name]
+    )
+}
+
+# All IAM roles must have a permission boundary (except service-linked roles)
+deny[msg] {
+    resource := input.resource_changes[_]
+    resource.type == "aws_iam_role"
+    resource.change.actions[_] == "create"
+    
+    # Exclude AWS service-linked roles
+    role_path := object.get(resource.change.after, "path", "/")
+    not startswith(role_path, "/aws-service-role/")
+    
+    boundary := object.get(resource.change.after, "permissions_boundary", "")
+    boundary == ""
+    
+    msg := sprintf(
+        "CRITICAL: IAM role '%s' does not have a permissions boundary. Required for least privilege.",
+        [resource.name]
+    )
+}
+
+# Deny wildcard actions in IAM policies
+deny[msg] {
+    resource := input.resource_changes[_]
+    resource.type in ["aws_iam_policy", "aws_iam_role_policy", "aws_iam_user_policy"]
+    
+    policy := parse_json_policy(resource)
+    statement := policy.Statement[_]
+    
+    action := statement.Action[_]
+    action == "*"
+    
+    msg := sprintf(
+        "CRITICAL: Policy '%s' contains wildcard action '*'. This violates least privilege principle.",
+        [resource.name]
+    )
+}
+
+# Deny wildcard resources in IAM policies
+deny[msg] {
+    resource := input.resource_changes[_]
+    resource.type in ["aws_iam_policy", "aws_iam_role_policy", "aws_iam_user_policy"]
+    
+    policy := parse_json_policy(resource)
+    statement := policy.Statement[_]
+    
+    statement.Effect == "Allow"
+    resource_val := statement.Resource[_]
+    resource_val == "*"
+    
+    # Exception: Allow for specific read-only actions
+    not is_allowed_wildcard_action(statement.Action)
+    
+    msg := sprintf(
+        "CRITICAL: Policy '%s' has wildcard resource '*' with Allow effect. Scope permissions to specific resources.",
+        [resource.name]
+    )
+}
+
+# Deny Administrator access policies
+deny[msg] {
+    resource := input.resource_changes[_]
+    resource.type == "aws_iam_policy_attachment"
+    
+    policy_arn := resource.change.after.policy_arn
+    contains(policy_arn, "AdministratorAccess")
+    
+    msg := sprintf(
+        "CRITICAL: Direct attachment of AdministratorAccess policy detected on '%s'. Use permission boundaries instead.",
+        [resource.name]
+    )
+}
+
+# Deny creation of access keys for root user
+deny[msg] {
+    resource := input.resource_changes[_]
+    resource.type == "aws_iam_access_key"
+    
+    user := resource.change.after.user
+    user == "root"
+    
+    msg := sprintf(
+        "CRITICAL: Access key creation for root user is forbidden. Use IAM users with MFA.",
+        []
+    )
+}
+
+# Require MFA for IAM users with console access
+warn[msg] {
+    resource := input.resource_changes[_]
+    resource.type == "aws_iam_user_login_profile"
+    resource.change.actions[_] == "create"
+    
+    user := resource.change.after.user
+    
+    # Check if corresponding MFA device exists
+    not has_mfa_device(user)
+    
+    msg := sprintf(
+        "WARNING: IAM user '%s' has console access but no MFA device configured. MFA required per PCI-DSS 8.3",
+        [user]
+    )
+}
+
+# Prevent overly permissive S3 bucket policies
+deny[msg] {
+    resource := input.resource_changes[_]
+    resource.type == "aws_s3_bucket_policy"
+    
+    policy := parse_json_policy(resource)
+    statement := policy.Statement[_]
+    
+    statement.Effect == "Allow"
+    principal := statement.Principal
+    principal == "*"
+    
+    # No condition to restrict access
+    not statement.Condition
+    
+    msg := sprintf(
+        "CRITICAL: S3 bucket policy '%s' allows public access without conditions. This violates data protection requirements.",
+        [resource.name]
+    )
+}
+
+# Prevent privilege escalation via IAM:PassRole
+deny[msg] {
+    resource := input.resource_changes[_]
+    resource.type in ["aws_iam_policy", "aws_iam_role_policy"]
+    
+    policy := parse_json_policy(resource)
+    statement := policy.Statement[_]
+    
+    action := statement.Action[_]
+    contains(action, "iam:PassRole")
+    
+    resource_val := statement.Resource[_]
+    resource_val == "*"
+    
+    msg := sprintf(
+        "CRITICAL: Policy '%s' allows iam:PassRole on all resources. This enables privilege escalation.",
+        [resource.name]
+    )
+}
+
+# Prevent policies that can modify permission boundaries
+deny[msg] {
+    resource := input.resource_changes[_]
+    resource.type in ["aws_iam_policy", "aws_iam_role_policy"]
+    
+    policy := parse_json_policy(resource)
+    statement := policy.Statement[_]
+    
+    dangerous_actions := {
+        "iam:DeleteUserPermissionsBoundary",
+        "iam:DeleteRolePermissionsBoundary",
+        "iam:PutUserPermissionsBoundary",
+        "iam:PutRolePermissionsBoundary"
+    }
+    
+    action := statement.Action[_]
+    action in dangerous_actions
+    
+    msg := sprintf(
+        "CRITICAL: Policy '%s' can modify permission boundaries with action '%s'. This bypasses security controls.",
+        [resource.name, action]
+    )
+}
+
+# Prevent creation of users/roles that can escalate privileges
+deny[msg] {
+    resource := input.resource_changes[_]
+    resource.type in ["aws_iam_policy", "aws_iam_role_policy"]
+    
+    policy := parse_json_policy(resource)
+    statement := policy.Statement[_]
+    
+    escalation_actions := {
+        "iam:CreatePolicyVersion",
+        "iam:SetDefaultPolicyVersion",
+        "iam:AttachUserPolicy",
+        "iam:AttachRolePolicy",
+        "iam:PutUserPolicy",
+        "iam:PutRolePolicy",
+        "iam:CreateAccessKey",
+        "iam:UpdateAssumeRolePolicy"
+    }
+    
+    action := statement.Action[_]
+    action in escalation_actions
+    
+    # Allow if properly scoped with conditions
+    not has_safe_conditions(statement)
+    
+    msg := sprintf(
+        "CRITICAL: Policy '%s' contains privilege escalation action '%s' without proper conditions.",
+        [resource.name, action]
+    )
+}
+
+# Enforce KMS key policy boundaries
+deny[msg] {
+    resource := input.resource_changes[_]
+    resource.type == "aws_kms_key"
+    
+    policy := parse_json_policy_from_field(resource, "policy")
+    statement := policy.Statement[_]
+    
+    statement.Effect == "Allow"
+    principal := statement.Principal.AWS
+    principal == "*"
+    
+    msg := sprintf(
+        "CRITICAL: KMS key '%s' has wildcard principal in policy. Restrict to specific IAM entities.",
+        [resource.name]
+    )
+}
+
+# Helper functions
+parse_json_policy(resource) := policy {
+    policy_str := object.get(resource.change.after, "policy", "{}")
+    policy := json.unmarshal(policy_str)
+}
+
+parse_json_policy_from_field(resource, field) := policy {
+    policy_str := object.get(resource.change.after, field, "{}")
+    policy := json.unmarshal(policy_str)
+}
+
+has_mfa_device(user) {
+    resource := input.resource_changes[_]
+    resource.type == "aws_iam_virtual_mfa_device"
+    resource.change.after.user == user
+}
+
+is_allowed_wildcard_action(actions) {
+    allowed_read_only := {
+        "s3:ListBucket",
+        "s3:GetObject",
+        "ec2:Describe*",
+        "cloudwatch:Get*",
+        "cloudwatch:List*"
+    }
+    
+    action := actions[_]
+    action in allowed_read_only
+}
+
+has_safe_conditions(statement) {
+    # Check for IP restriction
+    statement.Condition.IpAddress
+}
+
+has_safe_conditions(statement) {
+    # Check for MFA requirement
+    statement.Condition.Bool["aws:MultiFactorAuthPresent"] == "true"
+}
+
+# Compliance report
+iam_compliance_report[result] {
+    total_iam_resources := count([r | 
+        r := input.resource_changes[_]; 
+        startswith(r.type, "aws_iam_")
+    ])
+    
+    result := {
+        "total_iam_resources": total_iam_resources,
+        "policy": "IAM Boundary Check",
+        "least_privilege": "Enforced",
+        "permission_boundaries": "Required",
+        "compliance_frameworks": ["NIST-800-53-AC-6", "PCI-DSS-7.1", "SOC2-CC6.3"]
+    }
+}
