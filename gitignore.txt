@@ -1,0 +1,109 @@
+# Terraform Files
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+tfplan.binary
+tfplan.txt
+tfplan.json
+
+# Sensitive Data
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets.yaml
+secrets.yml
+.env
+.env.*
+!.env.example
+
+# IDE and Editor Files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Build Artifacts
+dist/
+build/
+*.zip
+*.tar.gz
+*.log
+
+# AWS Credentials
+.aws/
+aws-credentials.json
+
+# Lock Files (Keep for consistency)
+# .terraform.lock.hcl should be committed
+
+# Backup Files
+*.backup
+*.bak
+*.orig
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+
+# Test Coverage
+coverage/
+.coverage
+htmlcov/
+
+# Documentation Build
+docs/_build/
+site/
+
+# Temporary Files
+tmp/
+temp/
+*.tmp
+
+# Policy Test Results
+conftest-results/
+opa-results/
+
+# Cost Estimation
+infracost.json
+.infracost/
+
+# Compliance Reports
+compliance-reports/
+audit-logs/
+
+# Sentinel
+sentinel-test-results/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+ENV/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
