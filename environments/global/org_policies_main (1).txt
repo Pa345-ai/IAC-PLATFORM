@@ -1,0 +1,214 @@
+# environments/global/org-policies/main.tf
+# Service Control Policies for AWS Organization
+
+terraform {
+  required_version = ">= 1.6.0"
+  
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+  
+  backend "s3" {
+    key = "global/org-policies/terraform.tfstate"
+  }
+}
+
+provider "aws" {
+  region = var.aws_region
+}
+
+data "aws_organizations_organization" "current" {}
+
+################################################################################
+# Region Restriction Policy
+################################################################################
+
+resource "aws_organizations_policy" "region_restriction" {
+  name        = "RegionRestriction"
+  description = "Restrict resource creation to approved regions"
+  type        = "SERVICE_CONTROL_POLICY"
+  
+  content = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "DenyNonApprovedRegions"
+        Effect = "Deny"
+        Action = "*"
+        Resource = "*"
+        Condition = {
+          StringNotEquals = {
+            "aws:RequestedRegion" = var.allowed_regions
+          }
+          ArnNotLike = {
+            "aws:PrincipalArn" = "arn:aws:iam::*:role/OrganizationAccountAccessRole"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_organizations_policy_attachment" "region_restriction" {
+  policy_id = aws_organizations_policy.region_restriction.id
+  target_id = data.aws_organizations_organization.current.roots[0].id
+}
+
+################################################################################
+# Require Encryption Policy
+################################################################################
+
+resource "aws_organizations_policy" "require_encryption" {
+  name        = "RequireEncryption"
+  description = "Require encryption for S3 and EBS"
+  type        = "SERVICE_CONTROL_POLICY"
+  
+  content = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "DenyUnencryptedS3Uploads"
+        Effect = "Deny"
+        Action = "s3:PutObject"
+        Resource = "*"
+        Condition = {
+          StringNotEquals = {
+            "s3:x-amz-server-side-encryption" = ["AES256", "aws:kms"]
+          }
+        }
+      },
+      {
+        Sid    = "DenyUnencryptedEBSVolumes"
+        Effect = "Deny"
+        Action = [
+          "ec2:RunInstances",
+          "ec2:CreateVolume"
+        ]
+        Resource = "arn:aws:ec2:*:*:volume/*"
+        Condition = {
+          Bool = {
+            "ec2:Encrypted" = "false"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_organizations_policy_attachment" "require_encryption" {
+  policy_id = aws_organizations_policy.require_encryption.id
+  target_id = data.aws_organizations_organization.current.roots[0].id
+}
+
+################################################################################
+# Deny Root Account Usage
+################################################################################
+
+resource "aws_organizations_policy" "deny_root_usage" {
+  name        = "DenyRootAccountUsage"
+  description = "Prevent root account usage except for account closure"
+  type        = "SERVICE_CONTROL_POLICY"
+  
+  content = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "DenyRootAccountActions"
+        Effect = "Deny"
+        Action = "*"
+        Resource = "*"
+        Condition = {
+          StringLike = {
+            "aws:PrincipalArn" = "arn:aws:iam::*:root"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_organizations_policy_attachment" "deny_root_usage" {
+  policy_id = aws_organizations_policy.deny_root_usage.id
+  target_id = data.aws_organizations_organization.current.roots[0].id
+}
+
+################################################################################
+# Require MFA for Sensitive Actions
+################################################################################
+
+resource "aws_organizations_policy" "require_mfa" {
+  name        = "RequireMFA"
+  description = "Require MFA for sensitive operations"
+  type        = "SERVICE_CONTROL_POLICY"
+  
+  content = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "DenyActionsWithoutMFA"
+        Effect = "Deny"
+        Action = [
+          "ec2:StopInstances",
+          "ec2:TerminateInstances",
+          "rds:DeleteDBInstance",
+          "rds:DeleteDBCluster",
+          "s3:DeleteBucket",
+          "iam:DeleteUser",
+          "iam:DeleteRole"
+        ]
+        Resource = "*"
+        Condition = {
+          BoolIfExists = {
+            "aws:MultiFactorAuthPresent" = "false"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_organizations_policy_attachment" "require_mfa" {
+  policy_id = aws_organizations_policy.require_mfa.id
+  target_id = data.aws_organizations_organization.current.roots[0].id
+}
+
+################################################################################
+# Deny Public S3 Access
+################################################################################
+
+resource "aws_organizations_policy" "deny_public_s3" {
+  name        = "DenyPublicS3Access"
+  description = "Prevent public S3 bucket access"
+  type        = "SERVICE_CONTROL_POLICY"
+  
+  content = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "DenyPublicS3Actions"
+        Effect = "Deny"
+        Action = [
+          "s3:PutBucketPublicAccessBlock",
+          "s3:PutAccountPublicAccessBlock"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "s3:BlockPublicAcls"       = "false"
+            "s3:BlockPublicPolicy"     = "false"
+            "s3:IgnorePublicAcls"      = "false"
+            "s3:RestrictPublicBuckets" = "false"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_organizations_policy_attachment" "deny_public_s3" {
+  policy_id = aws_organizations_policy.deny_public_s3.id
+  target_id = data.aws_organizations_organization.current.roots[0].id
+}
