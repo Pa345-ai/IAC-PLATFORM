@@ -1,0 +1,26 @@
+# modules/security/kms/outputs.tf
+
+output "encryption_key_id" {
+  description = "ID of the KMS encryption key"
+  value       = aws_kms_key.main.key_id
+}
+
+output "encryption_key_arn" {
+  description = "ARN of the KMS encryption key"
+  value       = aws_kms_key.main.arn
+}
+
+output "encryption_key_alias" {
+  description = "Alias of the KMS encryption key"
+  value       = aws_kms_alias.main.name
+}
+
+output "encryption_key_alias_arn" {
+  description = "ARN of the KMS key alias"
+  value       = aws_kms_alias.main.arn
+}
+
+output "key_rotation_enabled" {
+  description = "Whether automatic key rotation is enabled"
+  value       = aws_kms_key.main.enable_key_rotation
+}
