@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+langchain
+openai
+anthropic
+scikit-learn
+pandas
+numpy
+pinecone-client
+python-dotenv
+sqlalchemy
+psycopg2-binary
+pytest
