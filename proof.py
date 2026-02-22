@@ -168,3 +168,27 @@ class Proof:
             json.dump(result, f, indent=4)
         logging.info(f"Finalized. Valid={valid}, Score={score:.4f}, Records={count}")
         return result
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  MAIN EXECUTION BLOCK (Add this at the end of proof.py)
+# ═════════════════════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    # Define the configuration for local execution
+    config = {
+        "dlp_id": 1234,              # Your DLP ID
+        "input_dir": "./dataset/jsonl", # Path to your generated .jsonl files
+        "output_path": "./output/results.json" # Where to save the earnings proof
+    }
+
+    print("--- Starting Proof Generation ---")
+    proof_engine = Proof(config)
+    result = proof_engine.generate()
+    
+    if result["valid"]:
+        print(f"✅ Success! Score: {result['score']}")
+        print(f"📂 Result saved to: {config['output_path']}")
+    else:
+        print(f"❌ Failed validation. Score: {result['score']}")
+        
