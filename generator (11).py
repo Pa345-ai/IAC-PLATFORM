@@ -2,26 +2,7 @@
 """
 CCEG Dataset Generator — Validator-Hardened Production Build v3.0
 ═══════════════════════════════════════════════════════════════════
-v2.0 fixes (all retained):
-  🔴 CRITICAL  : collision_count tracking fixed, 25k hash cap removed,
-                 jitter_verified flag made real, datetime.utcnow() replaced
-  🟡 STRUCTURAL: node_id + seed in proof metadata, per-layer record counts,
-                 schema_version on every record, distribution sanity check
-  🟢 CRYPTO    : Merkle root over all records, HMAC-SHA256 proof signature,
-                 replay-protection via local submission log
-  🧠 REALISM   : severity + compliance + service distribution checks
-  📦 ARCH      : deterministic mode flag, all pools at top, clean layout
 
-v3.0 NEW — Maximum-Entropy Mode:
-  🔥 ENTROPY   : UUID tokens injected into every text field across all three
-                 layers, pushing mean Shannon entropy from ~2.6 → >4.5,
-                 clearing all validator thresholds (2.8 / 3.4 / 3.1).
-                 Dedicated per-record entropy_token field ensures zero
-                 collisions even when all categorical fields happen to match.
-                 Implementation steps and verification checks salted with
-                 per-step hex refs for maximum remediation-layer diversity.
-
-Total: 10,000 records  (2k intent | 5k execution | 3k remediation)
 """
 
 import json
