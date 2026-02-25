@@ -196,7 +196,7 @@ class Proof:
 if __name__ == "__main__":
     config = {
         "dlp_id": 2,
-        "input_dir": "./input",
+        "input_dir": "dataset/jsonl",
         "output_path": "./output/results.json"
     }
 
