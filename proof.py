@@ -193,3 +193,23 @@ class Proof:
             f"Records={count}, BatchID={result['batch_id'][:8]}..."
         )
         return result
+if __name__ == "__main__":
+    config = {
+        "dlp_id": 2,
+        "input_dir": "./input",
+        "output_path": "./output/results.json"
+    }
+
+    proof_engine = Proof(config)
+    print("Starting Proof Generation...")
+    
+    result = proof_engine.generate()
+
+    if result["valid"]:
+        print("\nSUCCESS")
+        print(f"Score: {result['score']}")
+        print(f"Batch ID: {result['batch_id']}")
+        print(f"Saved to: {config['output_path']}")
+    else:
+        print("\nFAILED: Check if records exist in ./input")
+                      
